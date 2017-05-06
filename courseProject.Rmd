@@ -1,0 +1,164 @@
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Practical Machine Learning: Course Project
+
+## 1. Project Description
+
+### Background
+
+Using devices such as _Jawbone Up_, _Nike FuelBand_, and _Fitbit_ it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how _much_ of a particular activity they do, but they rarely quantify _how well they do it_. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+### Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+### What you should submit
+
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+---
+
+## 2. Loading the Data
+
+First we will load the libraries required for this project:
+
+```{r}
+library(caret)
+library(randomForest)
+library(rpart)
+library(rattle)
+```
+
+Next we will download the data files and read them into memory:
+
+```{r}
+trainingUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+if (!file.exists('pml-training.csv')){
+    download.file(trainingUrl, dest='pml-training.csv', method='curl')
+}
+if (!file.exists('pml-testing.csv')){
+    download.file(trainingUrl, dest='pml-testing.csv', method='curl')
+}
+
+trainingData <- read.csv('pml-training.csv', na.strings=c('NA', '', '#DIV/0!'))
+testingData <- read.csv('pml-testing.csv', na.strings=c('NA', '', '#DIV/0!'))
+```
+
+
+```{r}
+dim(trainingData)
+dim(testingData)
+```
+
+## 3. Partitioning the Training Data
+
+To perform cross-validation, we will split the training data into two sets using the `createDataPartition()` function: 
+  
+   * a training set (`train`), consisting of 60% of the training data, that will be used to train out models; and 
+   * a test set (`test`), consisting of the remaining 40% of the training data, that will be used for preliminary testing during model selection.  
+
+We will not use the test data we loaded above until the end of the project; we will call this the `testFinal` data set.
+
+```{r}
+# Split the training set into training and test sets:
+inTrain <- createDataPartition(y=trainingData$classe, p=0.6, list=FALSE)
+train <- trainingData[inTrain, ]
+test <- trainingData[-inTrain, ]
+# make a copy of the testing data that will be cleaned and tested 
+# after model selection and training
+testFinal <- testingData 
+# check that the dimensions make sense: same number of columns
+dim(train)
+dim(test)
+dim(testFinal)
+```
+
+## 4. Data Cleaning
+
+To clean the data, we will:
+
+  1. Remove first 6 columns of obviously irrelevant parameters (person's name, id number, etc.);
+  2. Remove parameters with low variance, which tend to have little predictive value;
+  3. Remove parameters with > 50% NA values
+
+We will apply these cleaning methods to each of our 3 data sets:
+
+```{r}
+# remove first 6 columns of obviously irrelevant parameters (person's name, id number, etc.)
+train <- train[, -(1:6)]
+test <- test[, -(1:6)]
+testFinal <- testFinal[, -(1:6)]
+```
+
+```{r}
+# remove parameters with low variance:
+lowVariance <- nearZeroVar(train, saveMetrics=TRUE)
+train <- train[, !lowVariance$nzv]
+test <- test[, !lowVariance$nzv]
+testFinal <- testFinal[, !lowVariance$nzv]
+```
+
+```{r}
+# define a function to identify fraction of NAs in column; delete columns with > 50% NAs
+fractionNAs <- apply(train, 2, function(col) sum(is.na(col)))/nrow(train)
+train <- train[!(fractionNAs > 0.5)]
+test <- test[!(fractionNAs > 0.5)]
+testFinal <- testFinal[!(fractionNAs > 0.5)]
+```
+
+```{r}
+# check the new dimensions
+dim(train)
+dim(test)
+dim(testFinal)
+```
+
+## 4. Model Selection
+
+We will train two models using the `train` partition of the and training data, and will test them using the `test` partition of the training data.  We will select the model with the higher accuracy.
+
+First, we will try a decision tree using `rpart`:
+
+```{r}
+# produce a decision tree 
+rpartModel <- rpart(classe ~ ., data=train, method='class')
+#fancyRpartPlot(rpartModel)
+```
+
+```{r}
+# test it on the test partition and get accuracy using confusionMatrix
+rpartPredictions <- predict(rpartModel, test, type='class')
+confusionMatrix(rpartPredictions, test$classe)
+```
+
+Next, we will do a random forest classifier:
+
+```{r}
+rfModel <- randomForest(classe ~ ., data=train, do.trace=FALSE)
+rfPredictions <- predict(rfModel, test, type='class')
+confusionMatrix(rfPredictions, test$classe)
+```
+
+The random forest method gives (by far) superior results.  We will select this model and use it on the training data.  
+
+## 5. Predictions for the Test Data
+
+The accuracy of the random forest model was 99.6% (with a 95% confidence interval of 0.994 to 0.997).  The out-of-sample error rate is therefore estimated to be 1 - 0.996 = 0.004 = 0.4%. When applied to the 20 samples in the test data set, we can expect approximately 0 missclassifications.
+
+```{r}
+finalPredictions <- predict(rfModel, testFinal, method='class')
+finalPredictions
+```
